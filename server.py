@@ -52,6 +52,7 @@ def uptodate(target: str, srcs: list[str]):
 class State(object):
     def __init__(self, root_path: str, cache_path):
         """pass in path should be absolute and normalized"""
+        logger.debug("### State(object) initialized")
         self.root_path = root_path
         self.cache_path = cache_path
         os.makedirs(cache_path, exist_ok=True)
@@ -86,14 +87,18 @@ class State(object):
 
     def reinit_compile_info(self):
         """all the compile information may change in background"""
+        logger.debug("### reinit_compile_info called")
 
         # store use to save compile_datainfo. it will be reload when config changes.
         self.store = {}  # main-thread
         self._compile_file = self.get_compile_file(self.config)
+        logger.debug("### checking os.path.exists for _compile_file = %s", self._compile_file)
         if os.path.exists(self._compile_file):
             self.compile_file = self._compile_file
             logger.info(f"use flags from {self._compile_file}")
+            logger.debug("### it does exists, updated compile_file")
         else:
+            logger.debug("### it does NOT exists, updated compile_file = None")
             self.compile_file = None
 
         # self._compile_file may change. need to init mtime to avoid trigger a change event
@@ -101,11 +106,15 @@ class State(object):
 
     @property
     def indexStorePath(self) -> Optional[str]:
+        logger.debug("### getting indexStorePath")
         if self.config.kind == "xcode":
             if not (root := self.config.build_root):
+                logger.debug("### root = %s, is not equal to self.config.build_root = %s, returning None", self.config.build_root)
                 return None
+            logger.debug("### returning %s", os.path.join(root, "Index.noindex/DataStore"))
             return os.path.join(root, "Index.noindex/DataStore")
 
+        logger.debug("### returning value from config self.config.indexStorePath", self.config.indexStorePath)
         return self.config.indexStorePath
 
     @property
@@ -131,7 +140,7 @@ class State(object):
                 return
 
         if not flags and file_path.endswith(".swift"):
-            flags = InferFlagsForSwift(file_path, self.compile_file, store=self.store)
+            flags = InferFlagsForSwift(file_path, self.compile_file, self.store, config=self.config)
 
         self._notify_option_changed(uri, self.optionsForFlags(flags))
 
@@ -142,7 +151,7 @@ class State(object):
         file_path = uri2realpath(uri)
         flags = GetFlags(file_path, self.compile_file, store=self.store)
         if not flags and file_path.endswith(".swift"):
-            flags = InferFlagsForSwift(file_path, self.compile_file, store=self.store)
+            flags = InferFlagsForSwift(file_path, self.compile_file, self.store, config=self.config)
         return self.optionsForFlags(flags)
 
     def optionsForFlags(self, flags):
@@ -345,9 +354,13 @@ def server_api():
         if not indexStorePath:
             indexStorePath = f"{cache_path}/indexStorePath"
 
+        logger.debug("### indexStorePath is %s", indexStorePath)
+
         indexStorePathHash = hashlib.md5(indexStorePath.encode("utf-8")).hexdigest()
         # database should unique to a indexStorePath
         indexDatabasePath = f"{cache_path}/indexDatabasePath-{indexStorePathHash}"
+
+        logger.debug("### indexDatabasePath is %s", indexDatabasePath)
 
         return {
             "jsonrpc": "2.0",

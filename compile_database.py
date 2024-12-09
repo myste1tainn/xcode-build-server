@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import subprocess
+import glob
 from typing import Dict, List, Optional
 
 
@@ -17,8 +18,15 @@ cmd_split_pattern = re.compile(
     re.X,
 )
 
+logger = logging.getLogger(__name__)
 
 def isProjectRoot(directory):
+    # Check if there are any .xcodeproj files in the directory
+    xcodeproj_files = glob.glob(os.path.join(directory, "*.xcodeproj"))
+    if xcodeproj_files:
+        return True  # Project root identified by .xcodeproj files
+
+    # Fallback: Check for .git directory
     return os.path.exists(os.path.join(directory, ".git"))
 
 
@@ -138,13 +146,17 @@ def filterFlags(items, fileCache):
 
 def findSwiftModuleRoot(filename):
     """return project root or None. if not found"""
+    logger.debug("### findSwiftModuleRoot for filename = %s", filename)
     filename = os.path.abspath(filename)
     directory = os.path.dirname(filename)
     flagFile = None
     compileFile = None
     while directory and directory != "/":
+        logger.debug("### while loop for dir = %s", directory)
         p = os.path.join(directory, ".swiftflags")
+        logger.debug("### p = %s", p)
         if os.path.isfile(p):
+            logger.debug("### p is file, returning dir = %s, p = %s, compileFile = %s", directory, p, compileFile)
             return (
                 directory,
                 p,
@@ -152,17 +164,23 @@ def findSwiftModuleRoot(filename):
             )  # prefer use swiftflags file as module root directory
 
         if compileFile is None:
+            logger.debug("### compileFile is None, getting compileFile")
             p = os.path.join(directory, ".compile")
             if os.path.isfile(p):
                 compileFile = p
+                logger.debug("### compileFile changed to %s", compileFile)
 
         if isProjectRoot(directory):
+            logger.debug("### isProjectRoot, breaking")
             break
         else:
             directory = os.path.dirname(directory)
+            logger.debug("### !isProjectRoot, dir changed to %s", directory)
     else:
+        logger.debug("### returning None, flagFile = %s, compileFile = %s", flagFile, compileFile)
         return (None, flagFile, compileFile)
 
+    logger.debug("### last line, returning dir = %s, flagFile = %s, compileFile = %s", directory, flagFile, compileFile)
     return (directory, flagFile, compileFile)
 
 def filekey(filename):
@@ -282,8 +300,10 @@ def GetFlagsInCompile(filename, compileFile, store):
     """read flags from compileFile. filename should be realpath"""
     if compileFile:
         command = commandForFile(filename, compileFile, store)
+        logger.debug("### for file %s, compileFile = %s, command = %s", filename, compileFile, command)
         if command:
             flags = cmd_split(command)[1:]  # ignore executable
+            logger.debug("### flags = %s", flags)
             return list(filterFlags(flags, store.setdefault("filelist", {})))
 
 
@@ -291,16 +311,25 @@ def GetFlags(filename: str, compileFile=None, store=None):
     """sourcekit entry function"""
     # NOTE: use store to ensure toplevel storage. child store should be other name
     # see store.setdefault to get all child attributes
-    if store is None: store = globalStore
+    if store is None:
+        logger.debug("### store is None: store = globalStore")
+        store = globalStore
+
+    logger.debug("### compileFile: %s", compileFile)
+    logger.debug("### filename: %s", filename)
+    logger.debug("### store: %s", store)
 
     if compileFile:
         if final_flags := GetFlagsInCompile(filename, compileFile, store):
+            logger.debug("### returning final_flags = %s", final_flags)
             return final_flags
+
+    logger.debug("### returning None")
     return None
 
 
 # TODO: c family infer flags #
-def InferFlagsForSwift(filename, compileFile, store):
+def InferFlagsForSwift(filename, compileFile, store, config):
     """try infer flags by convention and workspace files"""
     project_root, flagFile, compileFile = findSwiftModuleRoot(filename)
     logging.debug(f"infer root: {project_root}, {compileFile}")
@@ -327,13 +356,52 @@ def InferFlagsForSwift(filename, compileFile, store):
         else:
             final_flags += [
                 "-sdk",
-                "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/",
+                # TODO: Find a way to determined the right platform dynamically (xcrun + project setup reads)
+                # "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/",
+                "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.1.sdk",
+                "-I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift",
+                "-L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator",
             ]
+
+    if not final_flags:
+        final_flags = collectFlagsFromIntermediates(f"{config.build_root}/Build/Intermediates.noindex")
+        final_flags += [
+            "-sdk",
+            # TODO: Find a way to determined the right platform dynamically (xcrun + project setup reads)
+            # "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/",
+            "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator18.1.sdk",
+            "-I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift",
+            "-L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator",
+            "-L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
+            "-L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/usr/lib",
+            "-target",
+            "arm64-apple-ios17.5-simulator",
+            filename,
+        ]
+
     if not final_flags:
         final_flags = [
             filename,
             "-sdk",
-            "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/",
+            # TODO: Find a way to determined the right platform dynamically (xcrun + project setup reads)
+            # "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/",
+            "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.1.sdk",
+            "-I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift",
+            "-L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator",
         ]
+
+    return final_flags
+
+def collectFlagsFromIntermediates(intermediates_path):
+    """Collect -I and -F flags from Intermediates.noindex."""
+    final_flags = []
+
+    for root, dirs, files in os.walk(intermediates_path):
+        # Check if the directory contains .modulemap or .swiftmodule
+        for file in files:
+            if file.endswith(".modulemap") or file.endswith(".swiftmodule"):
+                final_flags.append("-I" + root)
+                final_flags.append("-F" + root)
+                break  # No need to check further in this directory
 
     return final_flags
