@@ -21,6 +21,11 @@ cmd_split_pattern = re.compile(
 logger = logging.getLogger(__name__)
 
 def isProjectRoot(directory):
+    # Check if there are any Package.swift files in the directory
+    packageswift_files = glob.glob(os.path.join(directory, "*Package.swift"))
+    if packageswift_files:
+        return True  # Project root identified by Package.swift files
+
     # Check if there are any .xcodeproj files in the directory
     xcodeproj_files = glob.glob(os.path.join(directory, "*.xcodeproj"))
     if xcodeproj_files:

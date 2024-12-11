@@ -92,13 +92,10 @@ class State(object):
         # store use to save compile_datainfo. it will be reload when config changes.
         self.store = {}  # main-thread
         self._compile_file = self.get_compile_file(self.config)
-        logger.debug("### checking os.path.exists for _compile_file = %s", self._compile_file)
         if os.path.exists(self._compile_file):
             self.compile_file = self._compile_file
             logger.info(f"use flags from {self._compile_file}")
-            logger.debug("### it does exists, updated compile_file")
         else:
-            logger.debug("### it does NOT exists, updated compile_file = None")
             self.compile_file = None
 
         # self._compile_file may change. need to init mtime to avoid trigger a change event
@@ -106,15 +103,11 @@ class State(object):
 
     @property
     def indexStorePath(self) -> Optional[str]:
-        logger.debug("### getting indexStorePath")
         if self.config.kind == "xcode":
             if not (root := self.config.build_root):
-                logger.debug("### root = %s, is not equal to self.config.build_root = %s, returning None", self.config.build_root)
                 return None
-            logger.debug("### returning %s", os.path.join(root, "Index.noindex/DataStore"))
             return os.path.join(root, "Index.noindex/DataStore")
 
-        logger.debug("### returning value from config self.config.indexStorePath", self.config.indexStorePath)
         return self.config.indexStorePath
 
     @property
@@ -295,6 +288,7 @@ class State(object):
     def trigger_parse(self, xcpath):
         # FIXME: ensure index_store_path from buildServer.json consistent with parsed .compile file..
         import xclog_parser
+        logger.debug("### trigger_parse")
 
         xclog_parser.hooks_echo_to_log = True
 
